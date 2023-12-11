@@ -1,0 +1,170 @@
+package com.cibertec.burguerbross.controller;
+
+import com.cibertec.burguerbross.model.*;
+import com.cibertec.burguerbross.repository.IDetallPedidoRepository;
+import com.cibertec.burguerbross.repository.IPedidoRepository;
+import com.cibertec.burguerbross.repository.IProductoRepository;
+import com.cibertec.burguerbross.repository.IUsuarioRepository;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+
+@Controller
+public class DetallePedidoController {
+
+
+    @Autowired
+    private IDetallPedidoRepository detPedidoRepo;
+
+    @Autowired
+    private IPedidoRepository pedidoRepo;
+
+    @Autowired
+    private IProductoRepository prodRepo;
+
+    @Autowired
+    private IUsuarioRepository repoUsuario;
+
+
+    private List<DetallePedidoTemp> llenarDetallePedidoTemp(int idPedido) {
+
+        List<DetallePedidoTemp> tempDetPed = new ArrayList<>();
+
+        for (DetallePedido dp : detPedidoRepo.findByIdPedido(idPedido)) {
+            Producto p = prodRepo.findById(dp.getId_producto()).orElse(new Producto());
+
+            DetallePedidoTemp dpt = new DetallePedidoTemp();
+            dpt.setIdDetallePedido(dp.getId_detalle_pedido());
+            dpt.setId_producto(dp.getId_producto());
+            dpt.setNombreProducto(p.getNombreProducto());
+            dpt.setPrecio_producto(dp.getPrecio_producto());
+            dpt.setCantidad(dp.getCantidad());
+            dpt.setSubtotal(dp.getSubtotal());
+
+            tempDetPed.add(dpt);
+        }
+
+        return tempDetPed;
+    }
+
+    @GetMapping("/verDetallePedido")
+    public String verDetallePedido(Model m, @RequestParam("idPedido") int idPedido, @CookieValue(value = "sesion", required = false) String sesion) {
+        String url;
+
+        Usuario u = repoUsuario.findById(Integer.parseInt(sesion)).orElse(new Usuario());
+
+        if (sesion != null) {
+            m.addAttribute("usuario", u.getNombreUsuario());
+            Pedido p = pedidoRepo.findById(idPedido).orElse(new Pedido());
+
+            m.addAttribute("totalPedido", p.getTotal_pedido());
+            m.addAttribute("nombreCliente", p.getNombre_cliente());
+            m.addAttribute("lstDetPedidos", llenarDetallePedidoTemp(idPedido));
+
+            url = "verDetallePedido";
+        }
+        else {
+            url = "redirect:/";
+        }
+
+        return url;
+    }
+
+    @GetMapping("/editarPedido")
+    public String editarPedido(@RequestParam("idPedido") int idPedido, Model m, @CookieValue(value = "sesion", required = false) String sesion) {
+        String url;
+
+        Usuario u = repoUsuario.findById(Integer.parseInt(sesion)).orElse(new Usuario());
+
+        if (sesion != null) {
+            m.addAttribute("usuario", u.getNombreUsuario());
+            Pedido p = pedidoRepo.findById(idPedido).orElse(new Pedido());
+
+            m.addAttribute("totalPedido", p.getTotal_pedido());
+            m.addAttribute("nombreCliente", p.getNombre_cliente());
+            m.addAttribute("lstDetPedidos", llenarDetallePedidoTemp(idPedido));
+
+            url = "editarPedido";
+        } else {
+            url = "redirect:/";
+        }
+
+
+        return url;
+    }
+
+    @GetMapping("/editarDetallePedido")
+    public String editarDetallePedido(@RequestParam("idDetPedido") int idDetPedido, @RequestParam("idProducto") int idProducto, Model m, @CookieValue(value = "sesion", required = false) String sesion) {
+        String url;
+
+        Usuario u = repoUsuario.findById(Integer.parseInt(sesion)).orElse(new Usuario());
+
+        if (sesion != null) {
+            m.addAttribute("usuario", u.getNombreUsuario());
+            m.addAttribute("selProd", prodRepo.findAll());
+            m.addAttribute("det_ped", detPedidoRepo.findById(idDetPedido));
+
+            url = "editarDetallePedido";
+        } else {
+            url = "redirect:/";
+        }
+
+        return url;
+    }
+
+    private BigDecimal calcularTotal(List<DetallePedido> list) {
+        BigDecimal total = new BigDecimal(0);
+
+        for (DetallePedido dp : list) {
+            total = total.add(dp.getSubtotal());
+        }
+
+        return total;
+    }
+
+    @PostMapping("/editarDetallePedido")
+    public String editarDetallePedidoPost(@ModelAttribute DetallePedido dp, RedirectAttributes redirect) {
+        //INSTANCIAMOS EL PRODUCTO CON LA ID ACTUALIZADA
+        Producto prod = prodRepo.findById(dp.getId_producto()).orElse(new Producto());
+
+        //BUSCAMOS LA FILA EN LA BASE DE DATOS CORRESPONDIENTE A SU ID ENVIADA DESDE EL FORMULARIO
+        DetallePedido detPed = detPedidoRepo.findById(dp.getId_detalle_pedido()).orElse(new DetallePedido());
+
+        //ACTUALIZAMOS LOS DATOS
+        detPed.setId_producto(dp.getId_producto());
+        detPed.setCantidad(dp.getCantidad());
+        detPed.setPrecio_producto(prod.getPrecioProducto());
+
+        //CALCULAMOS EL SUBTOTAL
+        BigDecimal subtotal = detPed.getPrecio_producto().multiply(BigDecimal.valueOf(detPed.getCantidad()));
+        //ACTUALIZAMOS EL SUBTOTAL
+        detPed.setSubtotal(subtotal);
+
+        //GUARDAMOS LOS CAMBIOS EN LA BD
+        detPedidoRepo.save(detPed);
+        //(Acá aun faltaria actualizar el total del pedido en la tabla tb_pedidos xd)
+
+        //DESPUES DE ACTUALIZAR EL DETALLEPEDIDO, BUSCAMOS TODOS LOS DETALLESPEDIDOS CON EL IDPEDIDO DE NUESTRA PREFERENCIA
+        List<DetallePedido> listDetallePedido = detPedidoRepo.findByIdPedido(dp.getIdPedido());
+
+        //LLAMAMOS AL PEDIDO DENTRO DE LA TBL_PEDIDOS
+        Pedido p = pedidoRepo.findById(dp.getIdPedido()).orElse(new Pedido());
+        //CALCULAMOS EL TOTAL
+        p.setTotal_pedido(calcularTotal(listDetallePedido));
+        //GUARDAMOS EL DATO
+        pedidoRepo.save(p);
+
+        //PARA EL REDIRECT NECESITO ENVIAR EL DATO idPedido:
+        redirect.addAttribute("idPedido", dp.getIdPedido());
+
+        return "redirect:/editarPedido";
+    }
+
+}
